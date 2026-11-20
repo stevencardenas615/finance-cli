@@ -781,3 +781,23 @@ def test_failed_import_row_is_not_left_half_written(tmp_path, monkeypatch, conne
 
     monkeypatch.setattr(finance_cli, "parse_date", real_parse_date)
     assert "No Transaction" in run("pull").output
+
+
+def test_export_refuses_to_replace_an_existing_file(tmp_path):
+    run("add", "5", "rent", "--date", "2026-09-01")
+    target = tmp_path / "out.csv"
+    target.write_text("something I did not want to lose\n")
+
+    result = run("export-history", target)
+    assert result.exit_code == 1
+    assert "already exists. Add --overwrite to replace it." in result.stderr
+    assert target.read_text() == "something I did not want to lose\n"
+
+
+def test_export_replaces_an_existing_file_with_overwrite(tmp_path):
+    run("add", "5", "rent", "--date", "2026-09-01")
+    target = tmp_path / "out.csv"
+    target.write_text("old contents\n")
+
+    assert run("export-history", target, "--overwrite").exit_code == 0
+    assert target.read_text().splitlines() == ["amount,category,date,note", "5.00,rent,2026-09-01,"]

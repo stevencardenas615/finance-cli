@@ -205,7 +205,12 @@ def export_history(
     choice: AllowedCategory | None = None,
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
+    overwrite: bool = False,
 ) -> None:
+    # Replacing a file destroys what was in it, so that has to be asked for.
+    if filename.exists() and not overwrite:
+        fail(f"File '{filename}' already exists. Add --overwrite to replace it.")
+
     with closing(db_connect(database_path())) as conn:
         history = fetch_history(conn, choice, start, end)
 
