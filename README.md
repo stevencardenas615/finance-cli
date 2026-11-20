@@ -1,4 +1,5 @@
 # Finance CLI
+![CI](https://github.com/stevencardenas615/finance-cli/actions/workflows/ci.yml/badge.svg)
 
 A command-line tool for saving and searching your personal finances.
 
