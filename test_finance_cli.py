@@ -493,3 +493,70 @@ def test_environment_variable_wins_over_a_database_in_the_current_folder(no_over
     monkeypatch.setenv("FINANCE_CLI_DB", str(tmp_path / "chosen.db"))
 
     assert "No Transaction" in run("pull").output
+
+
+def test_new_database_has_a_primary_key(tmp_path):
+    run("add", "5", "rent", "--date", "2026-09-01")
+    run("add", "6", "rent", "--date", "2026-09-02")
+
+    conn = sqlite3.connect(tmp_path / "test.db")
+    columns = conn.execute("PRAGMA table_info(history)").fetchall()
+    ids = conn.execute("SELECT id FROM history ORDER BY id").fetchall()
+    conn.close()
+
+    # Each PRAGMA row is (position, name, type, not null, default, primary key).
+    assert [column[1] for column in columns] == ["id", "amount", "category", "date", "note"]
+    assert [column[1] for column in columns if column[5]] == ["id"]
+    assert ids == [(1,), (2,)]
+
+
+@pytest.mark.parametrize("bad_row", [
+    (None, "rent", "2026-09-01", ""),
+    (0.0, "rent", "2026-09-01", ""),
+    (-5.0, "rent", "2026-09-01", ""),
+    (float("inf"), "rent", "2026-09-01", ""),
+    (float("nan"), "rent", "2026-09-01", ""),
+    (5.0, None, "2026-09-01", ""),
+    (5.0, "rent", None, ""),
+    (5.0, "rent", "yesterday", ""),
+    (5.0, "rent", "2026-09-01", None),
+])
+def test_new_database_refuses_bad_rows_by_itself(tmp_path, bad_row):
+    run("pull")  # creates the database
+
+    conn = sqlite3.connect(tmp_path / "test.db")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", bad_row)
+    conn.close()
+
+
+def test_database_from_an_old_version_keeps_working_unchanged(tmp_path):
+    make_old_database(tmp_path / "test.db", [
+        (1200.0, "rent", "2026-09-01", "September rent"),
+        (14.5, "food_dining", "2026-09-06", ""),
+    ])
+
+    assert run("add", "7.25", "food_dining", "--date", "2026-09-04", "--note", "coffee").exit_code == 0
+    assert run("pull").output.splitlines() == [
+        "2026-09-06 | FOOD_DINING | $14.50",
+        "2026-09-04 | FOOD_DINING | $7.25 | Note: coffee",
+        "2026-09-01 | RENT | $1200.00 | Note: September rent",
+    ]
+    assert run("summary").output.splitlines() == [
+        "RENT: $1200.00",
+        "FOOD_DINING: $21.75",
+        "TOTAL: $1221.75",
+    ]
+    exported = tmp_path / "out.csv"
+    run("export-history", exported)
+    assert len(exported.read_text().splitlines()) == 4
+
+    source = tmp_path / "more.csv"
+    source.write_text("amount,category,date,note\n9.99,subscriptions,2026-09-04,spotify\n")
+    assert "Successfully Imported: 1 rows" in run("import-history", source).output
+
+    # The old table is left exactly as it was: no id column was added.
+    conn = sqlite3.connect(tmp_path / "test.db")
+    columns = conn.execute("PRAGMA table_info(history)").fetchall()
+    conn.close()
+    assert [column[1] for column in columns] == ["amount", "category", "date", "note"]

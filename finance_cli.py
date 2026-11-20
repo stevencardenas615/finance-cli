@@ -15,6 +15,20 @@ DB_NAME = "transactions.db"
 CENT = Decimal("0.01")
 MAX_AMOUNT = Decimal("999999999.99")
 
+# Only runs when the table does not exist yet, so a database made by an older
+# version keeps its old table (four plain columns, no id, no constraints).
+# The checks repeat the rules in parse_amount and parse_date, so the database
+# refuses bad rows even if a future bug lets one through.
+CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS history (
+    id INTEGER PRIMARY KEY,
+    amount REAL NOT NULL CHECK (amount > 0 AND amount < 1000000000),
+    category TEXT NOT NULL,
+    date TEXT NOT NULL CHECK (date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    note TEXT NOT NULL DEFAULT ''
+)
+"""
+
 class AllowedCategory(str, Enum):
     RENT = "rent"
     FOOD_DINING = "food_dining"
@@ -78,7 +92,7 @@ def database_path() -> Path:
 def db_connect(database_file: Path) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
     database_file.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(database_file)
-    conn.execute("CREATE TABLE IF NOT EXISTS history (amount REAL, category TEXT, date TEXT, note TEXT)")
+    conn.execute(CREATE_TABLE)
     return conn, conn.cursor()
 
 def db_disconnect(connector: sqlite3.Connection) -> None:
@@ -130,7 +144,7 @@ def add(
 
     date_str = date.strftime("%Y-%m-%d")
 
-    cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), category, date_str, note))
+    cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), category.value, date_str, note))
     db_disconnect(conn)
 
 @app.command()
