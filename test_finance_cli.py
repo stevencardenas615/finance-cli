@@ -828,3 +828,13 @@ def test_every_command_explains_itself_in_help(command, words):
     result = run(command, "--help")
     assert result.exit_code == 0
     assert words in result.output
+
+
+def test_export_respects_date_range(tmp_path):
+    run("add", "10", "food_dining", "--date", "2026-09-02")
+    run("add", "20", "food_dining", "--date", "2026-09-10")
+    run("add", "30", "food_dining", "--date", "2026-10-01")
+    target = tmp_path / "out.csv"
+
+    run("export-history", target, "--start", "2026-09-05", "--end", "2026-09-30")
+    assert target.read_text().splitlines() == ["amount,category,date,note", "20.00,food_dining,2026-09-10,"]
