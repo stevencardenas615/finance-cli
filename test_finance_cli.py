@@ -813,3 +813,16 @@ def test_old_choice_option_is_gone():
     result = run("pull", "--choice", "rent")
     assert result.exit_code == 2
     assert "No such option: --choice" in result.output
+
+
+@pytest.mark.parametrize("command, words", [
+    ("add", "Save one transaction"),
+    ("pull", "List transactions"),
+    ("summary", "total spent per category"),
+    ("export-history", "Write transactions to a CSV file"),
+    ("import-history", "Bad rows are skipped"),
+])
+def test_every_command_explains_itself_in_help(command, words):
+    result = run(command, "--help")
+    assert result.exit_code == 0
+    assert words in result.output

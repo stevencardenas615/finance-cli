@@ -10,7 +10,7 @@ import csv
 from pathlib import Path
 from typing import NoReturn
 
-app = typer.Typer()
+app = typer.Typer(help="Save and search personal transactions in a local SQLite database.")
 
 DB_ENV_VAR = "FINANCE_CLI_DB"
 DB_NAME = "transactions.db"
@@ -155,11 +155,12 @@ def format_row(amount: Decimal, category: str, date: str, note: str) -> str:
 
 @app.command()
 def add(
-    amount: Decimal = typer.Argument(..., parser=parse_amount),
-    category: AllowedCategory = typer.Argument(...),
-    date: datetime | None = typer.Option(None, parser=parse_date),
-    note: str = "",
+    amount: Decimal = typer.Argument(..., parser=parse_amount, help="How much was spent, for example 14.50."),
+    category: AllowedCategory = typer.Argument(..., help="What it was spent on."),
+    date: datetime | None = typer.Option(None, parser=parse_date, help="Day it was spent, as YYYY-MM-DD. Today if left out."),
+    note: str = typer.Option("", help="A few words to remember it by."),
 ) -> None:
+    """Save one transaction."""
     if date is None:
         date = datetime.now()
 
@@ -173,10 +174,11 @@ def add(
 
 @app.command()
 def pull(
-    choice: AllowedCategory | None = typer.Option(None, "--category"),
-    start: datetime | None = typer.Option(None, parser=parse_date),
-    end: datetime | None = typer.Option(None, parser=parse_date),
+    choice: AllowedCategory | None = typer.Option(None, "--category", help="Only this category."),
+    start: datetime | None = typer.Option(None, parser=parse_date, help="First day to include, as YYYY-MM-DD."),
+    end: datetime | None = typer.Option(None, parser=parse_date, help="Last day to include, as YYYY-MM-DD."),
 ) -> None:
+    """List transactions, newest first."""
     with closing(db_connect(database_path())) as conn:
         history = fetch_history(conn, choice, start, end)
 
@@ -188,10 +190,11 @@ def pull(
 
 @app.command()
 def summary(
-    choice: AllowedCategory | None = typer.Option(None, "--category"),
-    start: datetime | None = typer.Option(None, parser=parse_date),
-    end: datetime | None = typer.Option(None, parser=parse_date),
+    choice: AllowedCategory | None = typer.Option(None, "--category", help="Only this category."),
+    start: datetime | None = typer.Option(None, parser=parse_date, help="First day to include, as YYYY-MM-DD."),
+    end: datetime | None = typer.Option(None, parser=parse_date, help="Last day to include, as YYYY-MM-DD."),
 ) -> None:
+    """Show the total spent per category and overall."""
     with closing(db_connect(database_path())) as conn:
         history = fetch_history(conn, choice, start, end)
 
@@ -206,12 +209,13 @@ def summary(
 
 @app.command()
 def export_history(
-    filename: Path,
-    choice: AllowedCategory | None = typer.Option(None, "--category"),
-    start: datetime | None = typer.Option(None, parser=parse_date),
-    end: datetime | None = typer.Option(None, parser=parse_date),
-    overwrite: bool = False,
+    filename: Path = typer.Argument(..., help="CSV file to create."),
+    choice: AllowedCategory | None = typer.Option(None, "--category", help="Only this category."),
+    start: datetime | None = typer.Option(None, parser=parse_date, help="First day to include, as YYYY-MM-DD."),
+    end: datetime | None = typer.Option(None, parser=parse_date, help="Last day to include, as YYYY-MM-DD."),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Replace the file if it already exists."),
 ) -> None:
+    """Write transactions to a CSV file."""
     # Replacing a file destroys what was in it, so that has to be asked for.
     if filename.exists() and not overwrite:
         fail(f"File '{filename}' already exists. Add --overwrite to replace it.")
@@ -231,7 +235,10 @@ def export_history(
     print(f"Exported {len(history)} rows to {filename}")
 
 @app.command()
-def import_history(filename: Path) -> None:
+def import_history(
+    filename: Path = typer.Argument(..., help="CSV file whose first line is amount,category,date,note."),
+) -> None:
+    """Add the transactions from a CSV file. Bad rows are skipped and reported."""
     if not filename.exists():
         fail(f"File '{filename}' does not exist.")
 
