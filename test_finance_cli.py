@@ -250,3 +250,19 @@ def test_import_accepts_a_file_with_a_byte_order_mark(tmp_path):
     result = run("import-history", source)
     assert "Successfully Imported: 3 rows" in result.output
     assert "Skipped (BAD INPUT): 2 rows" in result.output
+
+
+def test_import_reports_rows_with_too_many_fields(tmp_path):
+    source = tmp_path / "commas.csv"
+    source.write_text(
+        "amount,category,date,note\n"
+        "7.25,food_dining,2026-09-04,coffee, large\n"
+        '9.50,food_dining,2026-09-05,"tea, small"\n'
+    )
+
+    result = run("import-history", source)
+    assert "Successfully Imported: 1 rows" in result.output
+    assert "Skipped (BAD INPUT): 1 rows" in result.output
+    assert "Line 2: Error Too many fields" in result.output
+    # The quoted note keeps its comma. The unquoted row is not half imported.
+    assert run("pull").output.splitlines() == ["2026-09-05 | FOOD_DINING | $9.50 | Note: tea, small"]

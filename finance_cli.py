@@ -149,6 +149,9 @@ def import_history(filename: Path) -> None:
                 # A row that is too short gets None for the fields it lacks.
                 if raw_amount is None or raw_category is None or raw_date is None:
                     raise ValueError("Missing fields")
+                # Extra fields are collected under the key None. Usually a note with a comma and no quotes.
+                if None in row:
+                    raise ValueError("Too many fields (a note with a comma needs quotes)")
                 # The note is optional, so a row that stops after the date is fine.
                 note = (row.get("note") or "").strip()
 
