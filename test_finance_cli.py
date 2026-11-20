@@ -853,3 +853,18 @@ def test_pull_with_only_an_end_date():
     run("add", "20", "food_dining", "--date", "2026-09-10")
 
     assert run("pull", "--end", "2026-09-02").output.splitlines() == ["2026-09-02 | FOOD_DINING | $10.00"]
+
+
+def test_infinite_amount_left_by_an_old_version_does_not_crash(tmp_path):
+    # Before amounts were validated, "add inf" was stored as it was.
+    make_old_database(tmp_path / "test.db", [
+        (float("inf"), "rent", "2026-09-01", ""),
+        (10.0, "misc", "2026-09-02", ""),
+    ])
+
+    assert run("pull").output.splitlines() == [
+        "2026-09-02 | MISC | $10.00",
+        "2026-09-01 | RENT | $Infinity",
+    ]
+    assert run("summary").output.splitlines() == ["RENT: $Infinity", "MISC: $10.00", "TOTAL: $Infinity"]
+    assert run("export-history", tmp_path / "out.csv").exit_code == 0
