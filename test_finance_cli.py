@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import finance_cli
 from finance_cli import AllowedCategory, add_up, app, database_path, parse_amount, search_builder, stored_amount
 
 runner = CliRunner()
@@ -204,7 +205,8 @@ def test_import_skips_bad_rows_and_reports_them(tmp_path):
 def test_import_missing_file_exits_with_an_error(tmp_path):
     result = run("import-history", tmp_path / "nope.csv")
     assert result.exit_code == 1
-    assert "does not exist" in result.output
+    assert "does not exist" in result.stderr
+    assert result.stdout == ""
 
 
 def test_export_then_import_round_trip(tmp_path, monkeypatch):
@@ -603,3 +605,179 @@ def test_import_keeps_identical_rows_that_are_inside_one_file(tmp_path):
     assert "Successfully Imported: 3 rows" in result.output
     assert "Skipped (ALREADY STORED): 0 rows" in result.output
     assert run("summary").output.splitlines() == ["FOOD_DINING: $21.75", "TOTAL: $21.75"]
+
+
+# Expected failures: one "Error: ..." line on stderr and exit code 1. The run()
+# helper already fails the test if a command ends with a traceback instead.
+
+def test_import_of_a_folder_exits_with_an_error(tmp_path):
+    result = run("import-history", tmp_path)
+    assert result.exit_code == 1
+    assert result.stderr.startswith("Error: Cannot read")
+
+
+def test_import_of_a_file_that_is_not_text_exits_with_an_error(tmp_path):
+    source = tmp_path / "photo.csv"
+    source.write_bytes(b"\xff\xd8\xff\xe0 not text at all \x00\x01")
+
+    result = run("import-history", source)
+    assert result.exit_code == 1
+    assert "is not a UTF-8 CSV file" in result.stderr
+    assert "No Transaction" in run("pull").output
+
+
+def test_import_stops_when_text_breaks_halfway_and_stores_nothing(tmp_path):
+    # Two good rows, then bytes that are not UTF-8 (a file saved in an older Windows encoding).
+    source = tmp_path / "latin1.csv"
+    source.write_bytes(
+        b"amount,category,date,note\n"
+        b"5,rent,2026-09-01,ok\n"
+        b"6,rent,2026-09-02,ok\n"
+        b"7,food_dining,2026-09-03,caf\xe9\n"
+    )
+
+    result = run("import-history", source)
+    assert result.exit_code == 1
+    assert "is not a UTF-8 CSV file" in result.stderr
+    assert "No Transaction" in run("pull").output
+
+
+@pytest.mark.parametrize("content", [
+    "",
+    "45.20,food_dining,2026-09-01,groceries\n",
+    "amount,category,when,note\n45.20,food_dining,2026-09-01,groceries\n",
+])
+def test_import_without_the_header_line_exits_with_an_error(tmp_path, content):
+    source = tmp_path / "no_header.csv"
+    source.write_text(content)
+
+    result = run("import-history", source)
+    assert result.exit_code == 1
+    assert "The first line must be: amount,category,date,note" in result.stderr
+    assert "No Transaction" in run("pull").output
+
+
+def test_import_works_without_a_note_column(tmp_path):
+    source = tmp_path / "three_columns.csv"
+    source.write_text("amount,category,date\n5,rent,2026-09-01\n")
+
+    assert "Successfully Imported: 1 rows" in run("import-history", source).output
+    assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $5.00"]
+
+
+def test_export_to_a_folder_that_does_not_exist_exits_with_an_error(tmp_path):
+    run("add", "5", "rent", "--date", "2026-09-01")
+
+    result = run("export-history", tmp_path / "missing" / "out.csv")
+    assert result.exit_code == 1
+    assert result.stderr.startswith("Error: Cannot write")
+
+
+@pytest.mark.parametrize("command", [
+    ["add", "5", "rent"],
+    ["pull"],
+    ["summary"],
+    ["export-history", "out.csv"],
+])
+def test_file_that_is_not_a_database_exits_with_an_error(tmp_path, monkeypatch, command):
+    not_a_database = tmp_path / "notes.txt"
+    not_a_database.write_text("this is a text file, not a SQLite database\n" * 10)
+    monkeypatch.setenv("FINANCE_CLI_DB", str(not_a_database))
+    monkeypatch.chdir(tmp_path)
+
+    result = run(*command)
+    assert result.exit_code == 1
+    assert result.stderr.startswith("Error: Cannot use database")
+    assert not (tmp_path / "out.csv").exists()
+
+
+def test_database_path_that_cannot_be_created_exits_with_an_error(tmp_path, monkeypatch):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where a folder is needed")
+    monkeypatch.setenv("FINANCE_CLI_DB", str(blocker / "transactions.db"))
+
+    result = run("pull")
+    assert result.exit_code == 1
+    assert result.stderr.startswith("Error: Cannot open database")
+
+
+@pytest.fixture
+def connections(monkeypatch):
+    """Remember every connection the commands open, so a test can check they were closed."""
+    opened = []
+    real_connect = sqlite3.connect
+
+    def remembering_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", remembering_connect)
+    return opened
+
+
+def is_closed(conn):
+    try:
+        conn.execute("SELECT 1")
+    except sqlite3.ProgrammingError:  # "Cannot operate on a closed database."
+        return True
+    return False
+
+
+def test_every_command_closes_its_connection(tmp_path, connections):
+    source = tmp_path / "september.csv"
+    source.write_text(SEPTEMBER_CSV)
+
+    run("add", "5", "rent")
+    run("pull")
+    run("summary")
+    run("export-history", tmp_path / "out.csv")
+    run("import-history", source)
+
+    assert len(connections) == 5
+    assert all(is_closed(conn) for conn in connections)
+
+
+def test_connection_is_closed_when_the_file_is_not_a_database(tmp_path, monkeypatch, connections):
+    not_a_database = tmp_path / "notes.txt"
+    not_a_database.write_text("this is a text file, not a SQLite database\n" * 10)
+    monkeypatch.setenv("FINANCE_CLI_DB", str(not_a_database))
+
+    assert run("pull").exit_code == 1
+    assert len(connections) == 1
+    assert is_closed(connections[0])
+
+
+@pytest.mark.parametrize("command", [["pull"], ["summary"], ["export-history", "out.csv"]])
+def test_connection_is_closed_when_a_command_crashes_halfway(tmp_path, monkeypatch, connections, command):
+    def broken_fetch(*args, **kwargs):
+        raise RuntimeError("simulated bug")
+
+    monkeypatch.setattr(finance_cli, "fetch_history", broken_fetch)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, command)
+    assert isinstance(result.exception, RuntimeError)
+    assert len(connections) == 1
+    assert is_closed(connections[0])
+
+
+def test_failed_import_row_is_not_left_half_written(tmp_path, monkeypatch, connections):
+    # A crash in the middle of an import closes the connection without a commit,
+    # so none of the rows from that run are kept.
+    source = tmp_path / "september.csv"
+    source.write_text(SEPTEMBER_CSV)
+    real_parse_date = finance_cli.parse_date
+
+    def parse_date_with_a_bug(text):
+        if text == "2026-09-04":
+            raise RuntimeError("simulated bug")
+        return real_parse_date(text)
+
+    monkeypatch.setattr(finance_cli, "parse_date", parse_date_with_a_bug)
+    result = runner.invoke(app, ["import-history", str(source)])
+    assert isinstance(result.exception, RuntimeError)
+    assert is_closed(connections[0])
+
+    monkeypatch.setattr(finance_cli, "parse_date", real_parse_date)
+    assert "No Transaction" in run("pull").output

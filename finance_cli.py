@@ -1,11 +1,14 @@
 import os
+import sys
 import typer
+from contextlib import closing
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import sqlite3
 from enum import Enum
 import csv
 from pathlib import Path
+from typing import NoReturn
 
 app = typer.Typer()
 
@@ -37,6 +40,11 @@ class AllowedCategory(str, Enum):
     UTILITIES = "utilities"
     HEALTHCARE = "healthcare"
     MISC = "misc"
+
+def fail(message: str) -> NoReturn:
+    """Stop the command for a problem the user can fix: one line on stderr and exit code 1."""
+    print(f"Error: {message}", file=sys.stderr)
+    raise typer.Exit(code=1)
 
 def parse_amount(text: str) -> Decimal:
     """Turn text into an amount of money, or raise ValueError. Used by add and by import."""
@@ -89,15 +97,23 @@ def database_path() -> Path:
     # 3. Otherwise one fixed place per user, so the folder you run from does not matter.
     return Path.home() / ".finance-cli" / DB_NAME
 
-def db_connect(database_file: Path) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
-    database_file.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(database_file)
-    conn.execute(CREATE_TABLE)
-    return conn, conn.cursor()
+def db_connect(database_file: Path) -> sqlite3.Connection:
+    """Open the database, creating the folder, the file and the table if they are missing.
 
-def db_disconnect(connector: sqlite3.Connection) -> None:
-    connector.commit()
-    connector.close()
+    The commands use it as "with closing(db_connect(...)) as conn", so the connection
+    is closed even when something goes wrong halfway.
+    """
+    try:
+        database_file.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(database_file)
+    except (OSError, sqlite3.Error) as error:
+        fail(f"Cannot open database '{database_file}': {error}")
+    try:
+        conn.execute(CREATE_TABLE)
+    except sqlite3.Error as error:
+        conn.close()
+        fail(f"Cannot use database '{database_file}': {error}")
+    return conn
 
 def search_builder(choice: AllowedCategory | None = None, start: datetime | None = None, end: datetime | None = None) -> tuple[list[str], list[str]]:
     
@@ -113,7 +129,7 @@ def search_builder(choice: AllowedCategory | None = None, start: datetime | None
     return where_prompts, parameters
 
 def fetch_history(
-    cursor: sqlite3.Cursor,
+    conn: sqlite3.Connection,
     choice: AllowedCategory | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
@@ -127,7 +143,7 @@ def fetch_history(
     # Newest date first. Rows on the same date stay in the order they were added.
     query += " ORDER BY date DESC, rowid"
 
-    rows = cursor.execute(query, parameters).fetchall()
+    rows = conn.execute(query, parameters).fetchall()
     return [(stored_amount(amount), category, date, note) for amount, category, date, note in rows]
 
 @app.command()
@@ -137,15 +153,14 @@ def add(
     date: datetime | None = typer.Option(None, parser=parse_date),
     note: str = "",
 ) -> None:
-    conn, cursor = db_connect(database_path())
-
     if date is None:
         date = datetime.now()
 
     date_str = date.strftime("%Y-%m-%d")
 
-    cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), category.value, date_str, note))
-    db_disconnect(conn)
+    with closing(db_connect(database_path())) as conn:
+        conn.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), category.value, date_str, note))
+        conn.commit()
 
 @app.command()
 def pull(
@@ -153,9 +168,8 @@ def pull(
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
-    conn, cursor = db_connect(database_path())
-
-    history = fetch_history(cursor, choice, start, end)
+    with closing(db_connect(database_path())) as conn:
+        history = fetch_history(conn, choice, start, end)
 
     if not history:
         print("No Transaction")
@@ -167,17 +181,14 @@ def pull(
             else:
                 print("")
 
-    db_disconnect(conn)
-
 @app.command()
 def summary(
     choice: AllowedCategory | None = None,
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
-    conn, cursor = db_connect(database_path())
-
-    history = fetch_history(cursor, choice, start, end)
+    with closing(db_connect(database_path())) as conn:
+        history = fetch_history(conn, choice, start, end)
 
     if not history:
         print("No Transactions")
@@ -188,49 +199,56 @@ def summary(
             print(f"{category.upper()}: ${total:.2f}")
         print(f"TOTAL: ${sum(totals.values()):.2f}")
 
-    db_disconnect(conn)
-
 @app.command()
 def export_history(
-    filename: str,
+    filename: Path,
     choice: AllowedCategory | None = None,
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
+    with closing(db_connect(database_path())) as conn:
+        history = fetch_history(conn, choice, start, end)
 
-    conn, cursor = db_connect(database_path())
-
-    history = fetch_history(cursor, choice, start, end)
-
-    with open(filename, "w", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames = ["amount", "category", "date", "note"])
-        writer.writeheader()
-        for amount, category, date, note in history:
-            writer.writerow({"amount": f"{amount:.2f}", "category": category, "date": date, "note": note})
-
-    db_disconnect(conn)
+    try:
+        with open(filename, "w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames = ["amount", "category", "date", "note"])
+            writer.writeheader()
+            for amount, category, date, note in history:
+                writer.writerow({"amount": f"{amount:.2f}", "category": category, "date": date, "note": note})
+    except OSError as error:
+        fail(f"Cannot write '{filename}': {error.strerror}")
 
 @app.command()
 def import_history(filename: Path) -> None:
-    if not  filename.exists():
-        print(f"Error: File '{filename}' does not exist.")
-        raise typer.Exit(code=1)
+    if not filename.exists():
+        fail(f"File '{filename}' does not exist.")
 
-    conn, cursor = db_connect(database_path())
+    # Read the whole file before touching the database, so a file that cannot be read changes nothing.
+    try:
+        # utf-8-sig reads plain UTF-8 and also drops a byte-order mark if there is one.
+        with open(filename, "r", encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            rows = [(reader.line_num, row) for row in reader]
+            columns = reader.fieldnames or []
+    except OSError as error:
+        fail(f"Cannot read '{filename}': {error.strerror}")
+    except (UnicodeDecodeError, csv.Error) as error:
+        fail(f"'{filename}' is not a UTF-8 CSV file: {error}")
+
+    missing = [name for name in ["amount", "category", "date"] if name not in columns]
+    if missing:
+        fail(f"'{filename}' has no {', '.join(missing)} column. The first line must be: amount,category,date,note")
 
     success_count = 0
     duplicate_count = 0
     failed_rows = []
 
-    # What is stored before this import starts. A row from the file that is already
-    # in here is skipped, so importing the same file twice does not double anything.
-    already_stored = set(cursor.execute("SELECT amount, category, date, note FROM history").fetchall())
+    with closing(db_connect(database_path())) as conn:
+        # What is stored before this import starts. A row from the file that is already
+        # in here is skipped, so importing the same file twice does not double anything.
+        already_stored = set(conn.execute("SELECT amount, category, date, note FROM history").fetchall())
 
-    # utf-8-sig reads plain UTF-8 and also drops a byte-order mark if there is one.
-    with open(filename, "r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            current_line = reader.line_num
+        for current_line, row in rows:
             try:
                 raw_amount = row["amount"]
                 raw_category = row["category"]
@@ -255,13 +273,14 @@ def import_history(filename: Path) -> None:
                     duplicate_count += 1
                     continue
 
-                cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", new_row)
+                conn.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", new_row)
                 success_count += 1
-            except (KeyError, ValueError, TypeError) as error:
+            # Every reason to reject a row above is a ValueError. Anything else is a bug and should be loud.
+            except ValueError as error:
                 failed_rows.append(f"Line {current_line}: Error {error} | Data: {dict(row)}")
-                continue
 
-    db_disconnect(conn)
+        conn.commit()
+
     print(f"Successfully Imported: {success_count} rows")
     print(f"Skipped (ALREADY STORED): {duplicate_count} rows")
     print(f"Skipped (BAD INPUT): {len(failed_rows)} rows")
