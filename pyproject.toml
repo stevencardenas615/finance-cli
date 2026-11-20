@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finance-cli"
+version = "0.1.0"
+description = "Command-line tool for saving and searching personal transactions in SQLite"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer==0.29.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+]
+
+[project.scripts]
+finance-cli = "finance_cli:app"
+
+[tool.setuptools]
+py-modules = ["finance_cli"]

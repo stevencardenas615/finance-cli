@@ -6,3 +6,5 @@ venv/
 *.db
 *.csv
 .pytest_cache/
+*.egg-info/
+build/
