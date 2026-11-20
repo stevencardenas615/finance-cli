@@ -137,7 +137,8 @@ def import_history(filename: Path) -> None:
     success_count = 0
     failed_rows = []
 
-    with open(filename, "r") as file:
+    # utf-8-sig reads plain UTF-8 and also drops a byte-order mark if there is one.
+    with open(filename, "r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
         for row in reader:
             current_line = reader.line_num

@@ -240,3 +240,13 @@ def test_import_row_missing_a_required_field_is_skipped_and_the_rest_kept(tmp_pa
         "2026-09-04 | SUBSCRIPTIONS | $35.99 | Note: streaming",
         "2026-09-01 | FOOD_DINING | $45.20 | Note: groceries",
     ]
+
+
+def test_import_accepts_a_file_with_a_byte_order_mark(tmp_path):
+    # Excel's "CSV UTF-8" option puts a byte-order mark at the start of the file.
+    source = tmp_path / "from_excel.csv"
+    source.write_bytes(b"\xef\xbb\xbf" + SEPTEMBER_CSV.encode("utf-8"))
+
+    result = run("import-history", source)
+    assert "Successfully Imported: 3 rows" in result.output
+    assert "Skipped (BAD INPUT): 2 rows" in result.output
