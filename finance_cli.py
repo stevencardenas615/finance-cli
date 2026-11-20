@@ -177,7 +177,7 @@ def export_history(
         writer = csv.DictWriter(file, fieldnames = ["amount", "category", "date", "note"])
         writer.writeheader()
         for amount, category, date, note in history:
-            writer.writerow({"amount": amount, "category": category, "date": date, "note": note})
+            writer.writerow({"amount": f"{amount:.2f}", "category": category, "date": date, "note": note})
 
     db_disconnect(conn)
 

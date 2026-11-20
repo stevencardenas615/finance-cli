@@ -167,7 +167,20 @@ def test_export_writes_filtered_rows_to_csv(tmp_path):
     assert rows[0]["category"] == "food_dining"
     assert rows[0]["date"] == "2026-09-04"
     assert rows[0]["note"] == "coffee, large"
-    assert float(rows[0]["amount"]) == 7.25
+    assert rows[0]["amount"] == "7.25"
+
+
+def test_export_writes_amounts_with_two_decimals(tmp_path):
+    run("add", "14.5", "food_dining", "--date", "2026-09-06")
+    run("add", "250", "rent", "--date", "2026-09-05")
+    target = tmp_path / "out.csv"
+    run("export-history", target)
+
+    assert target.read_text().splitlines() == [
+        "amount,category,date,note",
+        "14.50,food_dining,2026-09-06,",
+        "250.00,rent,2026-09-05,",
+    ]
 
 
 def test_import_skips_bad_rows_and_reports_them(tmp_path):
