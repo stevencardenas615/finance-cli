@@ -1,4 +1,5 @@
 import csv
+import sqlite3
 from datetime import datetime
 from decimal import Decimal
 
@@ -6,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 import finance_cli
-from finance_cli import AllowedCategory, app, parse_amount, search_builder
+from finance_cli import AllowedCategory, add_up, app, parse_amount, search_builder, stored_amount
 
 runner = CliRunner()
 
@@ -358,3 +359,48 @@ def test_import_rejects_bad_dates(tmp_path):
     assert "Line 2: Error '09/01/2026' is not a date written as YYYY-MM-DD" in result.output
     assert "Line 3: Error '2026-02-30' is not a date written as YYYY-MM-DD" in result.output
     assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $5.00"]
+
+
+def test_stored_amount_gives_back_what_was_entered():
+    assert stored_amount(float(Decimal("0.10"))) == Decimal("0.10")
+    assert stored_amount(float(Decimal("999999999.99"))) == Decimal("999999999.99")
+    assert stored_amount(None) == Decimal("0.00")
+
+
+def test_add_up_is_exact_where_floats_are_not():
+    assert 0.10 + 0.20 != 0.30  # the reason the sums are not done with floats
+
+    totals = add_up([
+        ("misc", stored_amount(0.10)),
+        ("misc", stored_amount(0.20)),
+        ("rent", stored_amount(1200.0)),
+    ])
+    assert totals == {"misc": Decimal("0.30"), "rent": Decimal("1200.00")}
+    assert sum(totals.values()) == Decimal("1200.30")
+
+
+def test_summary_adds_many_small_amounts_exactly(tmp_path):
+    source = tmp_path / "dimes.csv"
+    source.write_text("amount,category,date,note\n" + "0.10,misc,2026-09-01,\n" * 1000 + "0.01,misc,2026-09-01,\n")
+    run("import-history", source)
+
+    assert run("summary").output.splitlines() == ["MISC: $100.01", "TOTAL: $100.01"]
+
+
+def make_old_database(path, rows):
+    """Build a database the way the first version of the tool created it."""
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE history (amount REAL, category TEXT, date TEXT, note TEXT)")
+    conn.executemany("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", rows)
+    conn.commit()
+    conn.close()
+
+
+def test_summary_survives_a_null_amount_left_by_an_old_version(tmp_path):
+    # Before amounts were validated, "add nan" stored NULL.
+    make_old_database(tmp_path / "test.db", [
+        (None, "rent", "2026-09-01", "was nan"),
+        (10.0, "rent", "2026-09-02", ""),
+    ])
+
+    assert run("summary").output.splitlines() == ["RENT: $10.00", "TOTAL: $10.00"]

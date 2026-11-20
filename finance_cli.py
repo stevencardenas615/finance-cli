@@ -39,6 +39,21 @@ def parse_amount(text: str) -> Decimal:
         raise ValueError("Amount can have at most two decimal places")
     return amount.quantize(CENT)
 
+def stored_amount(value: float | None) -> Decimal:
+    """Turn the number SQLite stored back into the exact amount that was entered."""
+    # A database from before amounts were validated can hold NULL where "nan" was added. Count it as zero.
+    if value is None:
+        return Decimal("0.00")
+    # str() gives the shortest text that identifies the float, which is the amount as it was typed.
+    return Decimal(str(value))
+
+def add_up(amounts: list[tuple[str, Decimal]]) -> dict[str, Decimal]:
+    """Total the (category, amount) pairs per category. Decimal keeps every cent exact."""
+    totals: dict[str, Decimal] = {}
+    for category, amount in amounts:
+        totals[category] = totals.get(category, Decimal("0.00")) + amount
+    return totals
+
 def parse_date(text: str) -> datetime:
     """Turn YYYY-MM-DD text into a date, or raise ValueError. Used by the date options and by import."""
     try:
@@ -124,23 +139,21 @@ def summary(
 
     where_prompts, parameters = search_builder(choice, start, end)
 
-    query = "SELECT category, SUM(amount) FROM history"
+    query = "SELECT category, amount FROM history"
 
     if where_prompts:
         query += " WHERE " + " AND ".join(where_prompts)
 
-    query += " GROUP BY category ORDER BY SUM(amount) DESC"
+    history = cursor.execute(query, parameters).fetchall()
 
-    report = cursor.execute(query, parameters).fetchall()
-
-    if not report:
+    if not history:
         print("No Transactions")
     else:
-        output = [f"{row[0].upper()}: ${row[1]:.2f}" for row in report]
-        total = [row[1] for row in report]
-        for line in output:
-            print(line)
-        print(f"TOTAL: ${sum(total):.2f}")
+        totals = add_up([(row[0], stored_amount(row[1])) for row in history])
+        # Largest category first.
+        for category, total in sorted(totals.items(), key=lambda item: item[1], reverse=True):
+            print(f"{category.upper()}: ${total:.2f}")
+        print(f"TOTAL: ${sum(totals.values()):.2f}")
 
     db_disconnect(conn)
 
