@@ -73,16 +73,34 @@ def db_disconnect(connector: sqlite3.Connection) -> None:
 def search_builder(choice: AllowedCategory | None = None, start: datetime | None = None, end: datetime | None = None) -> tuple[list[str], list[str]]:
     
     filters = [
-        ("category = ?", choice.value if choice else None, choice is not None),
-        ("date >= ?", start.strftime("%Y-%m-%d") if start else None, start is not None),
-        ("date <= ?", end.strftime("%Y-%m-%d") if end else None, end is not None)
+        ("category = ?", choice.value if choice else None),
+        ("date >= ?", start.strftime("%Y-%m-%d") if start else None),
+        ("date <= ?", end.strftime("%Y-%m-%d") if end else None)
         ]
 
-    where_prompts = [sql for sql, val, active in filters if active]
-    parameters = [val for sql, val, active in filters if active]
+    where_prompts = [sql for sql, val in filters if val is not None]
+    parameters = [val for sql, val in filters if val is not None]
 
     return where_prompts, parameters
-   
+
+def fetch_history(
+    cursor: sqlite3.Cursor,
+    choice: AllowedCategory | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[tuple[Decimal, str, str, str]]:
+    """Run the one SELECT that pull, summary and export share. Returns (amount, category, date, note) rows."""
+    where_prompts, parameters = search_builder(choice, start, end)
+
+    query = "SELECT amount, category, date, note FROM history"
+    if where_prompts:
+        query += " WHERE " + " AND ".join(where_prompts)
+    # Newest date first. Rows on the same date stay in the order they were added.
+    query += " ORDER BY date DESC, rowid"
+
+    rows = cursor.execute(query, parameters).fetchall()
+    return [(stored_amount(amount), category, date, note) for amount, category, date, note in rows]
+
 @app.command()
 def add(
     amount: Decimal = typer.Argument(..., parser=parse_amount),
@@ -108,22 +126,15 @@ def pull(
 ) -> None:
     conn, cursor = db_connect(user_database)
 
-    where_prompts, parameters = search_builder(choice, start, end)
+    history = fetch_history(cursor, choice, start, end)
 
-    query = "SELECT * FROM history"
-    if where_prompts:
-        query += " WHERE " + " AND ".join(where_prompts)
-    query += " ORDER BY date DESC"
-
-    history = cursor.execute(query, parameters).fetchall()
-                    
     if not history:
         print("No Transaction")
     else:
-        for row in history:
-            print(f"{row[2]} | {row[1].upper()} | ${row[0]:.2f}", end="")
-            if row[3]:
-                print(f" | Note: {row[3]}")
+        for amount, category, date, note in history:
+            print(f"{date} | {category.upper()} | ${amount:.2f}", end="")
+            if note:
+                print(f" | Note: {note}")
             else:
                 print("")
 
@@ -137,19 +148,12 @@ def summary(
 ) -> None:
     conn, cursor = db_connect(user_database)
 
-    where_prompts, parameters = search_builder(choice, start, end)
-
-    query = "SELECT category, amount FROM history"
-
-    if where_prompts:
-        query += " WHERE " + " AND ".join(where_prompts)
-
-    history = cursor.execute(query, parameters).fetchall()
+    history = fetch_history(cursor, choice, start, end)
 
     if not history:
         print("No Transactions")
     else:
-        totals = add_up([(row[0], stored_amount(row[1])) for row in history])
+        totals = add_up([(category, amount) for amount, category, date, note in history])
         # Largest category first.
         for category, total in sorted(totals.items(), key=lambda item: item[1], reverse=True):
             print(f"{category.upper()}: ${total:.2f}")
@@ -167,21 +171,13 @@ def export_history(
 
     conn, cursor = db_connect(user_database)
 
-    where_prompts, parameters = search_builder(choice, start, end)
+    history = fetch_history(cursor, choice, start, end)
 
-    query = "SELECT * FROM history"
-    if where_prompts:
-        query += " WHERE " + " AND ".join(where_prompts)
-    query += " ORDER BY date DESC"
-
-    history = cursor.execute(query, parameters).fetchall()
-
-        
     with open(filename, "w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames = ["amount", "category", "date", "note"])
         writer.writeheader()
-        for row in history:
-            writer.writerow({"amount": row[0], "category": row[1], "date": row[2], "note": row[3]})
+        for amount, category, date, note in history:
+            writer.writerow({"amount": amount, "category": category, "date": date, "note": note})
 
     db_disconnect(conn)
 

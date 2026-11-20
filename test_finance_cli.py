@@ -404,3 +404,20 @@ def test_summary_survives_a_null_amount_left_by_an_old_version(tmp_path):
     ])
 
     assert run("summary").output.splitlines() == ["RENT: $10.00", "TOTAL: $10.00"]
+
+
+def test_pull_survives_a_null_amount_left_by_an_old_version(tmp_path):
+    make_old_database(tmp_path / "test.db", [(None, "rent", "2026-09-01", "was nan")])
+
+    assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $0.00 | Note: was nan"]
+
+
+def test_rows_on_the_same_date_come_out_in_the_order_they_were_added():
+    for note in ["first", "second", "third"]:
+        run("add", "1", "misc", "--date", "2026-09-04", "--note", note)
+
+    assert run("pull").output.splitlines() == [
+        "2026-09-04 | MISC | $1.00 | Note: first",
+        "2026-09-04 | MISC | $1.00 | Note: second",
+        "2026-09-04 | MISC | $1.00 | Note: third",
+    ]
