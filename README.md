@@ -8,12 +8,18 @@ Stores transactions in a local SQLite database with a category, amount, date and
 
 ## Setup
 
-Requires Python 3.10+
+Requires Python 3.11+
 
 ```bash
-pip install typer
+git clone https://github.com/stevencardenas615/finance-cli.git
+cd finance-cli
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
 python finance_cli.py --help
 ```
+
+The dependencies are pinned in `pyproject.toml`. The install also adds a `finance-cli` command that works from any folder while the virtual environment is active.
 
 The database is created automatically on first use.
 
