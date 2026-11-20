@@ -560,3 +560,46 @@ def test_database_from_an_old_version_keeps_working_unchanged(tmp_path):
     columns = conn.execute("PRAGMA table_info(history)").fetchall()
     conn.close()
     assert [column[1] for column in columns] == ["amount", "category", "date", "note"]
+
+
+def test_importing_the_same_file_twice_does_not_double_anything(tmp_path):
+    source = tmp_path / "september.csv"
+    source.write_text(SEPTEMBER_CSV)
+
+    first = run("import-history", source)
+    assert "Successfully Imported: 3 rows" in first.output
+    assert "Skipped (ALREADY STORED): 0 rows" in first.output
+    pulled = run("pull").output
+
+    second = run("import-history", source)
+    assert "Successfully Imported: 0 rows" in second.output
+    assert "Skipped (ALREADY STORED): 3 rows" in second.output
+    assert "Skipped (BAD INPUT): 2 rows" in second.output
+    assert run("pull").output == pulled
+
+
+def test_export_then_import_into_the_same_database_does_not_double_anything(tmp_path):
+    run("add", "45.20", "food_dining", "--date", "2026-09-01", "--note", "groceries")
+    run("add", "1200", "rent", "--date", "2026-09-01")
+    summary = run("summary").output
+    exported = tmp_path / "backup.csv"
+    run("export-history", exported)
+
+    assert "Skipped (ALREADY STORED): 2 rows" in run("import-history", exported).output
+    assert run("summary").output == summary
+
+
+def test_import_keeps_identical_rows_that_are_inside_one_file(tmp_path):
+    # Two coffees at the same price on the same day are two real purchases.
+    source = tmp_path / "coffee.csv"
+    source.write_text(
+        "amount,category,date,note\n"
+        "7.25,food_dining,2026-09-04,coffee\n"
+        "7.25,food_dining,2026-09-04,coffee\n"
+        "7.25,food_dining,2026-09-04,second coffee\n"
+    )
+
+    result = run("import-history", source)
+    assert "Successfully Imported: 3 rows" in result.output
+    assert "Skipped (ALREADY STORED): 0 rows" in result.output
+    assert run("summary").output.splitlines() == ["FOOD_DINING: $21.75", "TOTAL: $21.75"]

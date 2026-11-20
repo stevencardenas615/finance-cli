@@ -219,7 +219,12 @@ def import_history(filename: Path) -> None:
     conn, cursor = db_connect(database_path())
 
     success_count = 0
+    duplicate_count = 0
     failed_rows = []
+
+    # What is stored before this import starts. A row from the file that is already
+    # in here is skipped, so importing the same file twice does not double anything.
+    already_stored = set(cursor.execute("SELECT amount, category, date, note FROM history").fetchall())
 
     # utf-8-sig reads plain UTF-8 and also drops a byte-order mark if there is one.
     with open(filename, "r", encoding="utf-8-sig", newline="") as file:
@@ -245,7 +250,12 @@ def import_history(filename: Path) -> None:
                 if raw_category not in [item.value for item in AllowedCategory]:
                     raise ValueError("Incorrect Category")
 
-                cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), raw_category, date_str, note))
+                new_row = (float(amount), raw_category, date_str, note)
+                if new_row in already_stored:
+                    duplicate_count += 1
+                    continue
+
+                cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", new_row)
                 success_count += 1
             except (KeyError, ValueError, TypeError) as error:
                 failed_rows.append(f"Line {current_line}: Error {error} | Data: {dict(row)}")
@@ -253,6 +263,7 @@ def import_history(filename: Path) -> None:
 
     db_disconnect(conn)
     print(f"Successfully Imported: {success_count} rows")
+    print(f"Skipped (ALREADY STORED): {duplicate_count} rows")
     print(f"Skipped (BAD INPUT): {len(failed_rows)} rows")
     if failed_rows:
         print("Failed Rows:")
