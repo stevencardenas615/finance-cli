@@ -1,3 +1,4 @@
+import os
 import typer
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -8,7 +9,8 @@ from pathlib import Path
 
 app = typer.Typer()
 
-user_database = "transactions.db"
+DB_ENV_VAR = "FINANCE_CLI_DB"
+DB_NAME = "transactions.db"
 
 CENT = Decimal("0.01")
 MAX_AMOUNT = Decimal("999999999.99")
@@ -61,7 +63,20 @@ def parse_date(text: str) -> datetime:
     except ValueError:
         raise ValueError(f"'{text}' is not a date written as YYYY-MM-DD") from None
 
-def db_connect(database_file: str | Path,) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
+def database_path() -> Path:
+    """Decide which database file to use."""
+    # 1. The environment variable wins when it is set.
+    override = os.environ.get(DB_ENV_VAR)
+    if override:
+        return Path(override)
+    # 2. Older versions created the file in the folder the command was run from. Keep using it if it is there.
+    if Path(DB_NAME).exists():
+        return Path(DB_NAME)
+    # 3. Otherwise one fixed place per user, so the folder you run from does not matter.
+    return Path.home() / ".finance-cli" / DB_NAME
+
+def db_connect(database_file: Path) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
+    database_file.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(database_file)
     conn.execute("CREATE TABLE IF NOT EXISTS history (amount REAL, category TEXT, date TEXT, note TEXT)")
     return conn, conn.cursor()
@@ -108,7 +123,7 @@ def add(
     date: datetime | None = typer.Option(None, parser=parse_date),
     note: str = "",
 ) -> None:
-    conn, cursor = db_connect(user_database)
+    conn, cursor = db_connect(database_path())
 
     if date is None:
         date = datetime.now()
@@ -124,7 +139,7 @@ def pull(
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
-    conn, cursor = db_connect(user_database)
+    conn, cursor = db_connect(database_path())
 
     history = fetch_history(cursor, choice, start, end)
 
@@ -146,7 +161,7 @@ def summary(
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
-    conn, cursor = db_connect(user_database)
+    conn, cursor = db_connect(database_path())
 
     history = fetch_history(cursor, choice, start, end)
 
@@ -169,7 +184,7 @@ def export_history(
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
 
-    conn, cursor = db_connect(user_database)
+    conn, cursor = db_connect(database_path())
 
     history = fetch_history(cursor, choice, start, end)
 
@@ -187,7 +202,7 @@ def import_history(filename: Path) -> None:
         print(f"Error: File '{filename}' does not exist.")
         raise typer.Exit(code=1)
 
-    conn, cursor = db_connect(user_database)
+    conn, cursor = db_connect(database_path())
 
     success_count = 0
     failed_rows = []

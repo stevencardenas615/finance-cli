@@ -21,7 +21,11 @@ python finance_cli.py --help
 
 The dependencies are pinned in `pyproject.toml`. The install also adds a `finance-cli` command that works from any folder while the virtual environment is active.
 
-The database is created automatically on first use.
+The database is created automatically on first use. The file is picked in this order:
+
+1. The path in the `FINANCE_CLI_DB` environment variable, if it is set.
+2. A `transactions.db` in the current folder, if one exists. Earlier versions created the file there, so an existing one keeps working.
+3. Otherwise `~/.finance-cli/transactions.db`, so the commands see the same data from any folder.
 
 ## Usage
 

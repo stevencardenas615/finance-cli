@@ -2,12 +2,12 @@ import csv
 import sqlite3
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-import finance_cli
-from finance_cli import AllowedCategory, add_up, app, parse_amount, search_builder, stored_amount
+from finance_cli import AllowedCategory, add_up, app, database_path, parse_amount, search_builder, stored_amount
 
 runner = CliRunner()
 
@@ -23,7 +23,7 @@ abc,utilities,2026-09-02,bad amount
 @pytest.fixture(autouse=True)
 def temp_database(tmp_path, monkeypatch):
     """Point every test at its own empty database inside pytest's temp folder."""
-    monkeypatch.setattr(finance_cli, "user_database", tmp_path / "test.db")
+    monkeypatch.setenv("FINANCE_CLI_DB", str(tmp_path / "test.db"))
 
 
 def run(*args):
@@ -215,7 +215,7 @@ def test_export_then_import_round_trip(tmp_path, monkeypatch):
     run("export-history", exported)
 
     # Import the file into a second, empty database.
-    monkeypatch.setattr(finance_cli, "user_database", tmp_path / "second.db")
+    monkeypatch.setenv("FINANCE_CLI_DB", str(tmp_path / "second.db"))
     assert "No Transaction" in run("pull").output
     assert "Successfully Imported: 2 rows" in run("import-history", exported).output
     assert run("pull").output == before
@@ -434,3 +434,62 @@ def test_rows_on_the_same_date_come_out_in_the_order_they_were_added():
         "2026-09-04 | MISC | $1.00 | Note: second",
         "2026-09-04 | MISC | $1.00 | Note: third",
     ]
+
+
+@pytest.fixture
+def no_override(tmp_path, monkeypatch):
+    """No environment variable, an empty current folder and a pretend home folder."""
+    monkeypatch.delenv("FINANCE_CLI_DB")
+    home = tmp_path / "home"
+    work = tmp_path / "work"
+    home.mkdir()
+    work.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.chdir(work)
+    return home, work
+
+
+def test_environment_variable_chooses_the_database_file(tmp_path, monkeypatch):
+    chosen = tmp_path / "somewhere" / "else" / "money.db"
+    monkeypatch.setenv("FINANCE_CLI_DB", str(chosen))
+
+    assert database_path() == chosen
+    assert run("add", "5", "rent", "--date", "2026-09-01").exit_code == 0
+    assert chosen.exists()
+
+
+def test_default_database_is_in_the_home_folder_not_the_current_one(no_override):
+    home, work = no_override
+
+    assert database_path() == home / ".finance-cli" / "transactions.db"
+    run("add", "5", "rent", "--date", "2026-09-01")
+    assert (home / ".finance-cli" / "transactions.db").exists()
+    assert list(work.iterdir()) == []
+
+
+def test_default_database_is_the_same_from_any_folder(no_override, tmp_path, monkeypatch):
+    run("add", "5", "rent", "--date", "2026-09-01")
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $5.00"]
+
+
+def test_existing_database_in_the_current_folder_keeps_working(no_override):
+    home, work = no_override
+    make_old_database(work / "transactions.db", [(1200.0, "rent", "2026-09-01", "September rent")])
+
+    assert database_path() == Path("transactions.db")
+    assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $1200.00 | Note: September rent"]
+    run("add", "5", "misc", "--date", "2026-09-02")
+    assert len(run("pull").output.splitlines()) == 2
+    assert list(home.iterdir()) == []
+
+
+def test_environment_variable_wins_over_a_database_in_the_current_folder(no_override, tmp_path, monkeypatch):
+    home, work = no_override
+    make_old_database(work / "transactions.db", [(1200.0, "rent", "2026-09-01", "")])
+    monkeypatch.setenv("FINANCE_CLI_DB", str(tmp_path / "chosen.db"))
+
+    assert "No Transaction" in run("pull").output
