@@ -100,13 +100,13 @@ def test_add_without_date_uses_today():
 def test_add_rejects_unknown_category():
     result = run("add", "3", "groceries")
     assert result.exit_code != 0
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 def test_pull_on_empty_database():
     result = run("pull")
     assert result.exit_code == 0
-    assert "No Transaction" in result.output
+    assert "No Transactions" in result.output
 
 
 def test_pull_filters_by_category_and_date_range():
@@ -224,7 +224,7 @@ def test_export_then_import_round_trip(tmp_path, monkeypatch):
 
     # Import the file into a second, empty database.
     monkeypatch.setenv("FINANCE_CLI_DB", str(tmp_path / "second.db"))
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
     assert "Successfully Imported: 2 rows" in run("import-history", exported).output
     assert run("pull").output == before
 
@@ -320,7 +320,7 @@ def test_add_rejects_invalid_amounts(text):
     result = run("add", "--", text, "rent")
     assert result.exit_code != 0
     assert "Invalid value for 'amount'" in result.output
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 def test_import_rejects_invalid_amounts_with_the_same_rules_as_add(tmp_path):
@@ -355,7 +355,7 @@ def test_add_rejects_dates_that_are_not_year_month_day(text):
     result = run("add", "5", "rent", "--date", text)
     assert result.exit_code != 0
     assert "Invalid value for '--date'" in result.output
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 @pytest.mark.parametrize("command", ["pull", "summary"])
@@ -500,7 +500,7 @@ def test_environment_variable_wins_over_a_database_in_the_current_folder(no_over
     make_old_database(work / "transactions.db", [(1200.0, "rent", "2026-09-01", "")])
     monkeypatch.setenv("FINANCE_CLI_DB", str(tmp_path / "chosen.db"))
 
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 def test_new_database_has_a_primary_key(tmp_path):
@@ -629,7 +629,7 @@ def test_import_of_a_file_that_is_not_text_exits_with_an_error(tmp_path):
     result = run("import-history", source)
     assert result.exit_code == 1
     assert "is not a UTF-8 CSV file" in result.stderr
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 def test_import_stops_when_text_breaks_halfway_and_stores_nothing(tmp_path):
@@ -645,7 +645,7 @@ def test_import_stops_when_text_breaks_halfway_and_stores_nothing(tmp_path):
     result = run("import-history", source)
     assert result.exit_code == 1
     assert "is not a UTF-8 CSV file" in result.stderr
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 @pytest.mark.parametrize("content", [
@@ -660,7 +660,7 @@ def test_import_without_the_header_line_exits_with_an_error(tmp_path, content):
     result = run("import-history", source)
     assert result.exit_code == 1
     assert "The first line must be: amount,category,date,note" in result.stderr
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 def test_import_works_without_a_note_column(tmp_path):
@@ -786,7 +786,7 @@ def test_failed_import_row_is_not_left_half_written(tmp_path, monkeypatch, conne
     assert is_closed(connections[0])
 
     monkeypatch.setattr(finance_cli, "parse_date", real_parse_date)
-    assert "No Transaction" in run("pull").output
+    assert "No Transactions" in run("pull").output
 
 
 def test_export_refuses_to_replace_an_existing_file(tmp_path):

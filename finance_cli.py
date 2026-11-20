@@ -181,7 +181,7 @@ def pull(
         history = fetch_history(conn, choice, start, end)
 
     if not history:
-        print("No Transaction")
+        print("No Transactions")
     else:
         for amount, category, date, note in history:
             print(format_row(amount, category, date, note))
