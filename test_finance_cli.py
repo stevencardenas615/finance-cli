@@ -838,3 +838,18 @@ def test_export_respects_date_range(tmp_path):
 
     run("export-history", target, "--start", "2026-09-05", "--end", "2026-09-30")
     assert target.read_text().splitlines() == ["amount,category,date,note", "20.00,food_dining,2026-09-10,"]
+
+
+def test_summary_respects_category():
+    run("add", "1200", "rent", "--date", "2026-09-01")
+    run("add", "10", "food_dining", "--date", "2026-09-02")
+
+    result = run("summary", "--category", "food_dining")
+    assert result.output.splitlines() == ["FOOD_DINING: $10.00", "TOTAL: $10.00"]
+
+
+def test_pull_with_only_an_end_date():
+    run("add", "10", "food_dining", "--date", "2026-09-02")
+    run("add", "20", "food_dining", "--date", "2026-09-10")
+
+    assert run("pull", "--end", "2026-09-02").output.splitlines() == ["2026-09-02 | FOOD_DINING | $10.00"]
