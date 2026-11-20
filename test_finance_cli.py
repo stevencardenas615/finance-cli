@@ -204,3 +204,39 @@ def test_export_then_import_round_trip(tmp_path, monkeypatch):
     assert "No Transaction" in run("pull").output
     assert "Successfully Imported: 2 rows" in run("import-history", exported).output
     assert run("pull").output == before
+
+
+def test_import_row_without_a_note_field_is_imported(tmp_path):
+    source = tmp_path / "short.csv"
+    source.write_text(
+        "amount,category,date,note\n"
+        "45.20,food_dining,2026-09-01,groceries\n"
+        "12.00,misc,2026-09-02\n"
+        "35.99,subscriptions,2026-09-04,streaming\n"
+    )
+
+    result = run("import-history", source)
+    assert result.exit_code == 0
+    assert "Successfully Imported: 3 rows" in result.output
+    assert "Skipped (BAD INPUT): 0 rows" in result.output
+    assert "2026-09-02 | MISC | $12.00" in run("pull").output.splitlines()
+
+
+def test_import_row_missing_a_required_field_is_skipped_and_the_rest_kept(tmp_path):
+    source = tmp_path / "short.csv"
+    source.write_text(
+        "amount,category,date,note\n"
+        "45.20,food_dining,2026-09-01,groceries\n"
+        "12.00,misc\n"
+        "35.99,subscriptions,2026-09-04,streaming\n"
+    )
+
+    result = run("import-history", source)
+    assert result.exit_code == 0
+    assert "Successfully Imported: 2 rows" in result.output
+    assert "Skipped (BAD INPUT): 1 rows" in result.output
+    assert "Line 3: Error Missing fields" in result.output
+    assert run("pull").output.splitlines() == [
+        "2026-09-04 | SUBSCRIPTIONS | $35.99 | Note: streaming",
+        "2026-09-01 | FOOD_DINING | $45.20 | Note: groceries",
+    ]

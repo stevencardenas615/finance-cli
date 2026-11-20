@@ -145,7 +145,11 @@ def import_history(filename: Path) -> None:
                 raw_amount = row["amount"]
                 raw_category = row["category"]
                 raw_date = row["date"]
-                note = row.get("note", "").strip()
+                # A row that is too short gets None for the fields it lacks.
+                if raw_amount is None or raw_category is None or raw_date is None:
+                    raise ValueError("Missing fields")
+                # The note is optional, so a row that stops after the date is fine.
+                note = (row.get("note") or "").strip()
 
                 amount = float(raw_amount)
                 valid_date = datetime.strptime(raw_date, "%Y-%m-%d")
