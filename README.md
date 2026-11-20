@@ -3,6 +3,8 @@
 
 A command-line tool for saving and searching your personal finances.
 
+This was my first finished project. I built it to learn how the parts of a small program fit together: command-line arguments, a database, CSV files and tests. I wrote it before [inventory-api](https://github.com/stevencardenas615/inventory-api), a FastAPI and PostgreSQL API, and later came back to it with what I learned there: exact money amounts, tests for every command, pinned dependencies and CI.
+
 ## What it does
 
 Stores transactions in a local SQLite database with a category, amount, date and optional note. Transactions can be filtered by category or date(s) including ranges. Results or transaction history can be exported into a csv file. Transaction history could also be imported into the database, streamlining usability. Transaction total amounts can also be calculated using date ranges, results are separated by category and a total line displayed at end.
@@ -177,13 +179,23 @@ The file has to be UTF-8 text and start with the `amount,category,date,note` lin
 
 ## Design Decisions
 
-**SQLite** The reason why I ended up using SQLite is because memory was being deleted on every instance when using the CLI. SQLite allows us to store this in a local database
+**SQLite** The reason why I ended up using SQLite is because memory was being deleted on every instance when using the CLI. SQLite allows us to store this in a local database.
 
 **Dynamic Query Builder** I used a dynamic query builder to prevent the confusing and constant if statements in the project. Adding another filter would've added another 4 lines of code of an if statement. The dynamic query builder helps significantly in streamlining the creation of future commands because of reusability.
 
 **Enum for categories** By using Enum for categories we can control, filter and check user input to ensure that it matches with what we are allowing. It's an all in one check that starts right from the CLI.
 
-**Import skips bad rows and reports them** For ease of use I decided in skipping the bad rows and printing the results at the end. The results show what row and for what reason data was rejected and not stored. This aids in the search of your csv file to view whats wrong. It also ensures that at least all data is checked and given a chance to be imported.
+**Import skips bad rows and reports them** For ease of use I decided in skipping the bad rows and printing the results at the end. The results show what row and for what reason data was rejected and not stored. This aids in the search of your csv file to view what's wrong. It also ensures that at least all data is checked and given a chance to be imported.
+
+## Limits
+
+- **Amounts are stored as REAL.** The amount column in SQLite is a floating point number. I kept it that way so that database files made by earlier versions keep working. To stay exact anyway, every amount is checked as a Decimal on the way in (greater than zero, at most two decimal places, at most 999999999.99) and totals are added up as Decimal, so sums are exact to the cent for every amount the tool accepts. In inventory-api I used NUMERIC from the start.
+- **Old database files keep their old table.** New databases get an `id` primary key and NOT NULL and CHECK constraints. A file made by an earlier version is not migrated, so there the rules are only enforced by the code. Earlier versions accepted `add nan`, which stored an empty amount. Such a row is shown as $0.00.
+- **Expenses only.** Amounts must be positive, so there is no income and there are no refunds.
+- **No edit or delete command.** A wrong entry can only be fixed by opening the database by hand.
+- **Categories are fixed in the code.**
+- **The duplicate check on import compares all four fields.** If a transaction is already stored, an identical row in a CSV file is skipped even when it was really a second purchase.
+- **One user, one machine.** It is a local file with no accounts and no sync.
 
 ## Testing
 
@@ -191,4 +203,5 @@ The file has to be UTF-8 text and start with the `amount,category,date,note` lin
 pytest
 ```
 
-Covers the query builder testing the inputs such as category, start and end dates
+The tests run every command through Typer's test runner against a temporary database, so they never touch real data. They cover add, pull, summary, export and import, the query builder, amount and date validation, the import cases above (short rows, extra fields, byte-order mark, duplicates, unreadable files), where the database file goes, and that a database made by the earlier version still works. GitHub Actions runs them on every push and pull request.
+
