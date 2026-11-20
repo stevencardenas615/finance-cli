@@ -146,6 +146,13 @@ def fetch_history(
     rows = conn.execute(query, parameters).fetchall()
     return [(stored_amount(amount), category, date, note) for amount, category, date, note in rows]
 
+def format_row(amount: Decimal, category: str, date: str, note: str) -> str:
+    """One transaction as one line of text, the way pull shows it."""
+    line = f"{date} | {category.upper()} | ${amount:.2f}"
+    if note:
+        line += f" | Note: {note}"
+    return line
+
 @app.command()
 def add(
     amount: Decimal = typer.Argument(..., parser=parse_amount),
@@ -162,6 +169,8 @@ def add(
         conn.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), category.value, date_str, note))
         conn.commit()
 
+    print("Added: " + format_row(amount, category.value, date_str, note))
+
 @app.command()
 def pull(
     choice: AllowedCategory | None = None,
@@ -175,11 +184,7 @@ def pull(
         print("No Transaction")
     else:
         for amount, category, date, note in history:
-            print(f"{date} | {category.upper()} | ${amount:.2f}", end="")
-            if note:
-                print(f" | Note: {note}")
-            else:
-                print("")
+            print(format_row(amount, category, date, note))
 
 @app.command()
 def summary(
@@ -222,6 +227,8 @@ def export_history(
                 writer.writerow({"amount": f"{amount:.2f}", "category": category, "date": date, "note": note})
     except OSError as error:
         fail(f"Cannot write '{filename}': {error.strerror}")
+
+    print(f"Exported {len(history)} rows to {filename}")
 
 @app.command()
 def import_history(filename: Path) -> None:

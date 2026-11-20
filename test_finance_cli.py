@@ -76,8 +76,12 @@ def test_search_builder_category_and_end_date():
 
 
 def test_add_then_pull_shows_the_transaction():
-    assert run("add", "14.50", "food_dining", "--date", "2026-09-06", "--note", "Lunch burrito").exit_code == 0
-    assert run("add", "5", "food_dining", "--date", "2026-09-05").exit_code == 0
+    added = run("add", "14.50", "food_dining", "--date", "2026-09-06", "--note", "Lunch burrito")
+    assert added.exit_code == 0
+    assert added.output == "Added: 2026-09-06 | FOOD_DINING | $14.50 | Note: Lunch burrito\n"
+    added = run("add", "5", "food_dining", "--date", "2026-09-05")
+    assert added.exit_code == 0
+    assert added.output == "Added: 2026-09-05 | FOOD_DINING | $5.00\n"
 
     result = run("pull")
     assert result.exit_code == 0
@@ -160,7 +164,9 @@ def test_export_writes_filtered_rows_to_csv(tmp_path):
     run("add", "7.25", "food_dining", "--date", "2026-09-04", "--note", "coffee, large")
     target = tmp_path / "out.csv"
 
-    assert run("export-history", target, "--choice", "food_dining").exit_code == 0
+    result = run("export-history", target, "--choice", "food_dining")
+    assert result.exit_code == 0
+    assert result.output == f"Exported 1 rows to {target}\n"
 
     with open(target, newline="") as file:
         rows = list(csv.DictReader(file))
