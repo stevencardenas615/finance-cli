@@ -115,7 +115,7 @@ def test_pull_filters_by_category_and_date_range():
     run("add", "20", "food_dining", "--date", "2026-09-10")
     run("add", "30", "food_dining", "--date", "2026-10-01")
 
-    by_category = run("pull", "--choice", "rent").output.splitlines()
+    by_category = run("pull", "--category", "rent").output.splitlines()
     assert by_category == ["2026-09-01 | RENT | $1200.00"]
 
     by_range = run("pull", "--start", "2026-09-02", "--end", "2026-09-10").output.splitlines()
@@ -124,7 +124,7 @@ def test_pull_filters_by_category_and_date_range():
         "2026-09-02 | FOOD_DINING | $10.00",
     ]
 
-    both = run("pull", "--choice", "food_dining", "--start", "2026-09-05").output.splitlines()
+    both = run("pull", "--category", "food_dining", "--start", "2026-09-05").output.splitlines()
     assert both == [
         "2026-10-01 | FOOD_DINING | $30.00",
         "2026-09-10 | FOOD_DINING | $20.00",
@@ -164,7 +164,7 @@ def test_export_writes_filtered_rows_to_csv(tmp_path):
     run("add", "7.25", "food_dining", "--date", "2026-09-04", "--note", "coffee, large")
     target = tmp_path / "out.csv"
 
-    result = run("export-history", target, "--choice", "food_dining")
+    result = run("export-history", target, "--category", "food_dining")
     assert result.exit_code == 0
     assert result.output == f"Exported 1 rows to {target}\n"
 
@@ -807,3 +807,9 @@ def test_export_replaces_an_existing_file_with_overwrite(tmp_path):
 
     assert run("export-history", target, "--overwrite").exit_code == 0
     assert target.read_text().splitlines() == ["amount,category,date,note", "5.00,rent,2026-09-01,"]
+
+
+def test_old_choice_option_is_gone():
+    result = run("pull", "--choice", "rent")
+    assert result.exit_code == 2
+    assert "No such option: --choice" in result.output

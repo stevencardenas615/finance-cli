@@ -173,7 +173,7 @@ def add(
 
 @app.command()
 def pull(
-    choice: AllowedCategory | None = None,
+    choice: AllowedCategory | None = typer.Option(None, "--category"),
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
@@ -188,7 +188,7 @@ def pull(
 
 @app.command()
 def summary(
-    choice: AllowedCategory | None = None,
+    choice: AllowedCategory | None = typer.Option(None, "--category"),
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
 ) -> None:
@@ -207,7 +207,7 @@ def summary(
 @app.command()
 def export_history(
     filename: Path,
-    choice: AllowedCategory | None = None,
+    choice: AllowedCategory | None = typer.Option(None, "--category"),
     start: datetime | None = typer.Option(None, parser=parse_date),
     end: datetime | None = typer.Option(None, parser=parse_date),
     overwrite: bool = False,
