@@ -39,6 +39,13 @@ def parse_amount(text: str) -> Decimal:
         raise ValueError("Amount can have at most two decimal places")
     return amount.quantize(CENT)
 
+def parse_date(text: str) -> datetime:
+    """Turn YYYY-MM-DD text into a date, or raise ValueError. Used by the date options and by import."""
+    try:
+        return datetime.strptime(text.strip(), "%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"'{text}' is not a date written as YYYY-MM-DD") from None
+
 def db_connect(database_file: str | Path,) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
     conn = sqlite3.connect(database_file)
     conn.execute("CREATE TABLE IF NOT EXISTS history (amount REAL, category TEXT, date TEXT, note TEXT)")
@@ -65,7 +72,7 @@ def search_builder(choice: AllowedCategory | None = None, start: datetime | None
 def add(
     amount: Decimal = typer.Argument(..., parser=parse_amount),
     category: AllowedCategory = typer.Argument(...),
-    date: datetime | None = None,
+    date: datetime | None = typer.Option(None, parser=parse_date),
     note: str = "",
 ) -> None:
     conn, cursor = db_connect(user_database)
@@ -79,7 +86,11 @@ def add(
     db_disconnect(conn)
 
 @app.command()
-def pull(choice: AllowedCategory | None = None, start: datetime | None = None, end: datetime | None = None) -> None:
+def pull(
+    choice: AllowedCategory | None = None,
+    start: datetime | None = typer.Option(None, parser=parse_date),
+    end: datetime | None = typer.Option(None, parser=parse_date),
+) -> None:
     conn, cursor = db_connect(user_database)
 
     where_prompts, parameters = search_builder(choice, start, end)
@@ -104,7 +115,11 @@ def pull(choice: AllowedCategory | None = None, start: datetime | None = None, e
     db_disconnect(conn)
 
 @app.command()
-def summary(choice: AllowedCategory | None = None, start: datetime | None = None, end: datetime | None = None) -> None:
+def summary(
+    choice: AllowedCategory | None = None,
+    start: datetime | None = typer.Option(None, parser=parse_date),
+    end: datetime | None = typer.Option(None, parser=parse_date),
+) -> None:
     conn, cursor = db_connect(user_database)
 
     where_prompts, parameters = search_builder(choice, start, end)
@@ -130,7 +145,12 @@ def summary(choice: AllowedCategory | None = None, start: datetime | None = None
     db_disconnect(conn)
 
 @app.command()
-def export_history(filename: str, choice: AllowedCategory | None = None, start: datetime | None = None, end: datetime | None = None) -> None:
+def export_history(
+    filename: str,
+    choice: AllowedCategory | None = None,
+    start: datetime | None = typer.Option(None, parser=parse_date),
+    end: datetime | None = typer.Option(None, parser=parse_date),
+) -> None:
 
     conn, cursor = db_connect(user_database)
 
@@ -182,8 +202,7 @@ def import_history(filename: Path) -> None:
                 note = (row.get("note") or "").strip()
 
                 amount = parse_amount(raw_amount)
-                valid_date = datetime.strptime(raw_date, "%Y-%m-%d")
-                date_str = valid_date.strftime("%Y-%m-%d")
+                date_str = parse_date(raw_date).strftime("%Y-%m-%d")
 
                 if raw_category not in [item.value for item in AllowedCategory]:
                     raise ValueError("Incorrect Category")

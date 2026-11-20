@@ -321,3 +321,40 @@ def test_import_rejects_invalid_amounts_with_the_same_rules_as_add(tmp_path):
     assert "Line 4: Error Amount must be greater than zero" in result.output
     assert "Line 6: Error Amount can have at most two decimal places" in result.output
     assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $12.50 | Note: the only good row"]
+
+
+def test_add_normalises_a_date_without_leading_zeros():
+    run("add", "5", "rent", "--date", "2026-9-1")
+    assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $5.00"]
+
+
+@pytest.mark.parametrize("text", ["5", "20260901", "2026-13-01", "09/01/2026", "2026-09-01T10:00:00", "tomorrow"])
+def test_add_rejects_dates_that_are_not_year_month_day(text):
+    result = run("add", "5", "rent", "--date", text)
+    assert result.exit_code != 0
+    assert "Invalid value for '--date'" in result.output
+    assert "No Transaction" in run("pull").output
+
+
+@pytest.mark.parametrize("command", ["pull", "summary"])
+@pytest.mark.parametrize("option", ["--start", "--end"])
+def test_filters_reject_bad_dates(command, option):
+    result = run(command, option, "20260901")
+    assert result.exit_code != 0
+    assert f"Invalid value for '{option}'" in result.output
+
+
+def test_import_rejects_bad_dates(tmp_path):
+    source = tmp_path / "dates.csv"
+    source.write_text(
+        "amount,category,date,note\n"
+        "5,rent,09/01/2026,\n"
+        "5,rent,2026-02-30,\n"
+        "5,rent,2026-9-1,\n"
+    )
+
+    result = run("import-history", source)
+    assert "Successfully Imported: 1 rows" in result.output
+    assert "Line 2: Error '09/01/2026' is not a date written as YYYY-MM-DD" in result.output
+    assert "Line 3: Error '2026-02-30' is not a date written as YYYY-MM-DD" in result.output
+    assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $5.00"]
