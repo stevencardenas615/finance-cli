@@ -1,11 +1,12 @@
 import csv
 from datetime import datetime
+from decimal import Decimal
 
 import pytest
 from typer.testing import CliRunner
 
 import finance_cli
-from finance_cli import AllowedCategory, app, search_builder
+from finance_cli import AllowedCategory, app, parse_amount, search_builder
 
 runner = CliRunner()
 
@@ -266,3 +267,57 @@ def test_import_reports_rows_with_too_many_fields(tmp_path):
     assert "Line 2: Error Too many fields" in result.output
     # The quoted note keeps its comma. The unquoted row is not half imported.
     assert run("pull").output.splitlines() == ["2026-09-05 | FOOD_DINING | $9.50 | Note: tea, small"]
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("12.50", Decimal("12.50")),
+    ("12.5", Decimal("12.50")),
+    ("7", Decimal("7.00")),
+    (" 0.01 ", Decimal("0.01")),
+    ("999999999.99", Decimal("999999999.99")),
+])
+def test_parse_amount_accepts_valid_amounts(text, expected):
+    assert parse_amount(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "nan", "NaN", "inf", "-inf", "Infinity", "1e400",
+    "abc", "", " ", "$5", "1,200.00", "12.5.0",
+    "0", "0.00", "-5", "-0.01",
+    "1.999", "0.001",
+    "1000000000",
+])
+def test_parse_amount_rejects_everything_else(text):
+    with pytest.raises(ValueError):
+        parse_amount(text)
+
+
+@pytest.mark.parametrize("text", ["nan", "inf", "1e400", "abc", "0", "1.999", "-5"])
+def test_add_rejects_invalid_amounts(text):
+    # The "--" stops "-5" from being read as an option.
+    result = run("add", "--", text, "rent")
+    assert result.exit_code != 0
+    assert "Invalid value for 'amount'" in result.output
+    assert "No Transaction" in run("pull").output
+
+
+def test_import_rejects_invalid_amounts_with_the_same_rules_as_add(tmp_path):
+    source = tmp_path / "amounts.csv"
+    source.write_text(
+        "amount,category,date,note\n"
+        "nan,rent,2026-09-01,\n"
+        "inf,rent,2026-09-01,\n"
+        "-5,rent,2026-09-01,\n"
+        "0,rent,2026-09-01,\n"
+        "1.999,rent,2026-09-01,\n"
+        ",rent,2026-09-01,\n"
+        "12.5,rent,2026-09-01,the only good row\n"
+    )
+
+    result = run("import-history", source)
+    assert "Successfully Imported: 1 rows" in result.output
+    assert "Skipped (BAD INPUT): 6 rows" in result.output
+    assert "Line 2: Error 'nan' is not a number" in result.output
+    assert "Line 4: Error Amount must be greater than zero" in result.output
+    assert "Line 6: Error Amount can have at most two decimal places" in result.output
+    assert run("pull").output.splitlines() == ["2026-09-01 | RENT | $12.50 | Note: the only good row"]

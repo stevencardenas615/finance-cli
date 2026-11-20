@@ -1,5 +1,6 @@
 import typer
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 import sqlite3
 from enum import Enum
 import csv
@@ -9,6 +10,9 @@ app = typer.Typer()
 
 user_database = "transactions.db"
 
+CENT = Decimal("0.01")
+MAX_AMOUNT = Decimal("999999999.99")
+
 class AllowedCategory(str, Enum):
     RENT = "rent"
     FOOD_DINING = "food_dining"
@@ -17,6 +21,23 @@ class AllowedCategory(str, Enum):
     UTILITIES = "utilities"
     HEALTHCARE = "healthcare"
     MISC = "misc"
+
+def parse_amount(text: str) -> Decimal:
+    """Turn text into an amount of money, or raise ValueError. Used by add and by import."""
+    try:
+        amount = Decimal(text.strip())
+    except InvalidOperation:
+        raise ValueError(f"'{text}' is not a number") from None
+    # Decimal accepts "nan" and "inf", which are not amounts.
+    if not amount.is_finite():
+        raise ValueError(f"'{text}' is not a number")
+    if amount <= 0:
+        raise ValueError("Amount must be greater than zero")
+    if amount > MAX_AMOUNT:
+        raise ValueError(f"Amount must not be more than {MAX_AMOUNT}")
+    if amount != amount.quantize(CENT):
+        raise ValueError("Amount can have at most two decimal places")
+    return amount.quantize(CENT)
 
 def db_connect(database_file: str | Path,) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
     conn = sqlite3.connect(database_file)
@@ -41,7 +62,12 @@ def search_builder(choice: AllowedCategory | None = None, start: datetime | None
     return where_prompts, parameters
    
 @app.command()
-def add(amount: float, category: AllowedCategory, date: datetime | None = None, note: str = "") -> None:
+def add(
+    amount: Decimal = typer.Argument(..., parser=parse_amount),
+    category: AllowedCategory = typer.Argument(...),
+    date: datetime | None = None,
+    note: str = "",
+) -> None:
     conn, cursor = db_connect(user_database)
 
     if date is None:
@@ -49,7 +75,7 @@ def add(amount: float, category: AllowedCategory, date: datetime | None = None, 
 
     date_str = date.strftime("%Y-%m-%d")
 
-    cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (amount, category, date_str, note))
+    cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), category, date_str, note))
     db_disconnect(conn)
 
 @app.command()
@@ -155,14 +181,14 @@ def import_history(filename: Path) -> None:
                 # The note is optional, so a row that stops after the date is fine.
                 note = (row.get("note") or "").strip()
 
-                amount = float(raw_amount)
+                amount = parse_amount(raw_amount)
                 valid_date = datetime.strptime(raw_date, "%Y-%m-%d")
                 date_str = valid_date.strftime("%Y-%m-%d")
 
                 if raw_category not in [item.value for item in AllowedCategory]:
                     raise ValueError("Incorrect Category")
 
-                cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (amount, raw_category, date_str, note))
+                cursor.execute("INSERT INTO history (amount, category, date, note) VALUES (?, ?, ?, ?)", (float(amount), raw_category, date_str, note))
                 success_count += 1
             except (KeyError, ValueError, TypeError) as error:
                 failed_rows.append(f"Line {current_line}: Error {error} | Data: {dict(row)}")
