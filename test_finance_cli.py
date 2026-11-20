@@ -10,7 +10,9 @@ from typer.testing import CliRunner
 import finance_cli
 from finance_cli import AllowedCategory, add_up, app, database_path, parse_amount, search_builder, stored_amount
 
-runner = CliRunner()
+# TERM=dumb makes Typer print its usage errors as plain text. Without it Typer
+# adds colour codes on GitHub Actions and the text comparisons below would fail there.
+runner = CliRunner(env={"TERM": "dumb"})
 
 SEPTEMBER_CSV = """amount,category,date,note
 45.20,food_dining,2026-09-01,groceries
